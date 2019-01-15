@@ -1,0 +1,101 @@
+image: alpine:latest
+
+variables:
+  DOCKER_DRIVER: overlay2
+
+stages:
+  - build
+
+build:
+  stage: build
+  image: docker:stable-git
+  services:
+  - docker:stable-dind
+  script:
+    - setup_docker
+    - build_image
+    - push_image
+  only:
+    - master
+    - merge_requests
+    
+# ---------------------------------------------------------------------------
+
+.auto_devops: &auto_devops |
+  [[ "$TRACE" ]] && set -x
+  export APPLICATION_REPOSITORY=$CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG
+  export APPLICATION_TAG=$CI_COMMIT_SHA
+  export CI_CONTAINER_NAME=ci_job_build_${CI_JOB_ID}
+ 
+  function registry_login() {
+    if [[ -n "$CI_REGISTRY_USER" ]]; then
+      echo "Logging to GitLab Container Registry with CI credentials..."
+      docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+      echo ""
+    fi
+  }
+
+  function setup_docker() {
+    if ! docker info &>/dev/null; then
+      if [ -z "$DOCKER_HOST" -a "$KUBERNETES_PORT" ]; then
+        export DOCKER_HOST='tcp://localhost:2375'
+      fi
+    fi
+
+    registry_login
+    pull_current_build_image
+  }
+
+  function pull_latest_image() {
+    echo "Pulling latest image for this repository and branch..."
+    docker pull "$APPLICATION_REPOSITORY:build" || true
+    docker pull "$APPLICATION_REPOSITORY:latest" || true
+  }
+
+  function pull_current_build_image() {
+    echo "Pulling current build image for this repository and branch..."
+    docker pull "$APPLICATION_REPOSITORY:$APPLICATION_TAG" || true
+  }
+
+  function build_image() {
+    echo "Building Dockerfile-based application..."
+    pull_latest_image
+
+    docker build \
+      --build-arg HTTP_PROXY="$HTTP_PROXY" \
+      --build-arg http_proxy="$http_proxy" \
+      --build-arg HTTPS_PROXY="$HTTPS_PROXY" \
+      --build-arg https_proxy="$https_proxy" \
+      --build-arg FTP_PROXY="$FTP_PROXY" \
+      --build-arg ftp_proxy="$ftp_proxy" \
+      --build-arg NO_PROXY="$NO_PROXY" \
+      --build-arg no_proxy="$no_proxy" \
+      --cache-from "$APPLICATION_REPOSITORY:build" \
+      --target build \
+      -t "$APPLICATION_REPOSITORY:build" .
+
+    docker build \
+      --build-arg HTTP_PROXY="$HTTP_PROXY" \
+      --build-arg http_proxy="$http_proxy" \
+      --build-arg HTTPS_PROXY="$HTTPS_PROXY" \
+      --build-arg https_proxy="$https_proxy" \
+      --build-arg FTP_PROXY="$FTP_PROXY" \
+      --build-arg ftp_proxy="$ftp_proxy" \
+      --build-arg NO_PROXY="$NO_PROXY" \
+      --build-arg no_proxy="$no_proxy" \
+      --cache-from "$APPLICATION_REPOSITORY:build" \
+      --cache-from "$APPLICATION_REPOSITORY:latest" \
+      -t "$APPLICATION_REPOSITORY:$APPLICATION_TAG" \
+      -t "$APPLICATION_REPOSITORY:latest" .
+  }
+
+  function push_image() {
+      echo "Pushing to GitLab Container Registry..."
+      docker push "$APPLICATION_REPOSITORY:build"
+      docker push "$APPLICATION_REPOSITORY:$APPLICATION_TAG"
+      docker push "$APPLICATION_REPOSITORY:latest"
+      echo ""
+  }
+
+before_script:
+  - *auto_devops
