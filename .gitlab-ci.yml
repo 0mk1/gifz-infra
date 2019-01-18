@@ -14,8 +14,8 @@ build:
   - docker:stable-dind
   script:
     - setup_docker
-    - build_image
-    - push_image
+    - ls -la /builds/t0ffi9/gifz-infra/
+    - ls -la /builds/t0ffi9/gifz-infra/frontend
   only:
     - master
     - merge_requests
